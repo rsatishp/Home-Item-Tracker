@@ -3,10 +3,15 @@ import { getGeminiKey, getItems, Item, saveItem, deleteItem } from "./storage";
 export interface ExtractionResult {
   action: "add" | "remove";
   name: string;
-  location?: string;
-  type?: "perishable" | "consumable" | "non-perishable";
-  tags?: string[];
-  notes?: string;
+  location: string;
+  type: "perishable" | "consumable" | "non-perishable";
+  tags: string[];
+  notes: string;
+}
+
+export interface ApplyResult {
+  action: "added" | "updated" | "removed" | "not-found";
+  item?: Item;
 }
 
 export async function generateContent(prompt: string): Promise<string> {
@@ -22,30 +27,31 @@ export async function generateContent(prompt: string): Promise<string> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1, // Keep it deterministic
-        }
+        generationConfig: { temperature: 0.1 },
       }),
     }
   );
 
   if (!res.ok) {
     const errData = await res.json().catch(() => null);
-    throw new Error(errData?.error?.message || `API Error: ${res.status} ${res.statusText}`);
+    throw new Error(
+      errData?.error?.message || `API Error: ${res.status} ${res.statusText}`
+    );
   }
 
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error("Failed to parse response from Gemini");
-  }
-
+  if (!text) throw new Error("Failed to parse response from Gemini");
   return text;
 }
 
-export async function processItemStatement(userInput: string): Promise<{ result: ExtractionResult, item?: Item }> {
+/**
+ * Pure extraction step — calls Gemini and returns parsed result.
+ * Does NOT mutate storage. Call applyExtraction() to commit.
+ */
+export async function extractItemInfo(userInput: string): Promise<ExtractionResult> {
   const existingItems = getItems();
-  
+
   const prompt = `You are a home item tracker. The user has entered a natural language statement
 about a household item. Extract structured information and return ONLY valid JSON
 in this exact format — no explanation, no markdown, just JSON:
@@ -106,62 +112,115 @@ User input: "${userInput.replace(/"/g, '\\"')}"
 Current items in storage (for context): ${JSON.stringify(existingItems)}`;
 
   let responseText = await generateContent(prompt);
-  
-  // Clean up any markdown blocks if the model didn't listen
-  responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-  
+  responseText = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
+
   let result: ExtractionResult;
   try {
     result = JSON.parse(responseText);
-  } catch (err) {
+  } catch {
     throw new Error("Failed to parse structured data from Gemini response");
   }
 
-  // App-side logic
-  if (result.action === "add") {
-    const existingIndex = existingItems.findIndex(i => i.name.toLowerCase() === result.name.toLowerCase());
-    const timestamp = new Date().toISOString();
-    
-    let itemToSave: Item;
-    if (existingIndex >= 0) {
-      itemToSave = {
-        ...existingItems[existingIndex],
-        location: result.location || existingItems[existingIndex].location,
-        type: result.type || existingItems[existingIndex].type,
-        tags: result.tags?.length ? result.tags : existingItems[existingIndex].tags,
-        notes: result.notes || existingItems[existingIndex].notes,
-        originalText: userInput,
-        updatedAt: timestamp,
-      };
-    } else {
-      itemToSave = {
-        id: crypto.randomUUID(),
-        name: result.name,
-        location: result.location || "unknown",
-        type: result.type || "non-perishable",
-        tags: result.tags || [],
-        notes: result.notes || "",
-        originalText: userInput,
-        updatedAt: timestamp,
-      };
+  return {
+    action: result.action,
+    name: result.name || "",
+    location: result.location || "unknown",
+    type: result.type || "non-perishable",
+    tags: Array.isArray(result.tags) ? result.tags : [],
+    notes: result.notes || "",
+  };
+}
+
+/**
+ * Compute a fuzzy similarity score between two strings (0–1).
+ * Uses token overlap (Jaccard similarity) with a substring bonus.
+ */
+function fuzzyScore(a: string, b: string): number {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .trim();
+  const na = norm(a);
+  const nb = norm(b);
+
+  if (na === nb) return 1.0;
+  if (na.includes(nb) || nb.includes(na)) return 0.9;
+
+  const tokensA = new Set(na.split(/\s+/).filter(Boolean));
+  const tokensB = new Set(nb.split(/\s+/).filter(Boolean));
+  const intersection = [...tokensA].filter((t) => tokensB.has(t)).length;
+  const union = new Set([...tokensA, ...tokensB]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Find the best-matching item by fuzzy name search.
+ * Returns the item if score >= threshold, otherwise null.
+ */
+function findBestMatch(name: string, items: Item[], threshold = 0.5): Item | null {
+  let bestScore = 0;
+  let bestItem: Item | null = null;
+
+  for (const item of items) {
+    const score = fuzzyScore(name, item.name);
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
     }
-    
+  }
+
+  return bestScore >= threshold ? bestItem : null;
+}
+
+/**
+ * Commit an extraction result to storage.
+ * Call this AFTER the user confirms the parsed result in the UI.
+ */
+export function applyExtraction(result: ExtractionResult, userInput: string): ApplyResult {
+  const existingItems = getItems();
+  const timestamp = new Date().toISOString();
+
+  if (result.action === "add") {
+    const existing = findBestMatch(result.name, existingItems, 0.85);
+    const isUpdate = !!existing;
+
+    const itemToSave: Item = existing
+      ? {
+          ...existing,
+          location: result.location || existing.location,
+          type: result.type || existing.type,
+          tags: result.tags.length ? result.tags : existing.tags,
+          notes: result.notes || existing.notes,
+          originalText: userInput,
+          updatedAt: timestamp,
+        }
+      : {
+          id: crypto.randomUUID(),
+          name: result.name,
+          location: result.location || "unknown",
+          type: result.type || "non-perishable",
+          tags: result.tags,
+          notes: result.notes,
+          originalText: userInput,
+          updatedAt: timestamp,
+        };
+
     saveItem(itemToSave);
-    return { result, item: itemToSave };
+    return { action: isUpdate ? "updated" : "added", item: itemToSave };
   } else {
-    // Remove action
-    const match = existingItems.find(i => i.name.toLowerCase() === result.name.toLowerCase());
+    const match = findBestMatch(result.name, existingItems, 0.5);
     if (match) {
       deleteItem(match.id);
-      return { result, item: match };
+      return { action: "removed", item: match };
     }
-    return { result };
+    return { action: "not-found" };
   }
 }
 
 export async function askQuestion(userQuery: string): Promise<string> {
   const existingItems = getItems();
-  
+
   const prompt = `You are a home item tracker assistant. The user wants to find something.
 Answer their question using only the items listed below. Be concise and specific.
 
