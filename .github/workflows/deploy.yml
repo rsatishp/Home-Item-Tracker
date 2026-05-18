@@ -42,8 +42,11 @@ jobs:
         run: pnpm --filter @workspace/home-tracker run build
         env:
           NODE_ENV: production
+<<<<<<< HEAD
           # Auto-detects /<repo-name>/ for project repos.
           # For a root Pages repo (username.github.io), trigger manually and set base_path to /
+=======
+>>>>>>> 24309612644384a85939b5f3d0fc3443017ddb78
           BASE_PATH: ${{ inputs.base_path || format('/{0}/', github.event.repository.name) }}
 
       - name: Add SPA routing fallback
