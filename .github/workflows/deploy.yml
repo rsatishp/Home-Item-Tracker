@@ -4,21 +4,21 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      base_path:
+        description: "Base path for the app (e.g. / for a root Pages repo, or /<repo-name>/ for a project repo). Leave blank to auto-detect from the repo name."
+        required: false
+        default: ""
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,18 +41,21 @@ jobs:
       - name: Build
         run: pnpm --filter @workspace/home-tracker run build
         env:
-          # For a project repo (username.github.io/repo-name), set BASE_PATH to /<repo-name>/
-          # For a root repo (username.github.io), set BASE_PATH to /
-          BASE_PATH: /${{ github.event.repository.name }}/
+          NODE_ENV: production
+          # Auto-detects /<repo-name>/ for project repos.
+          # For a root Pages repo (username.github.io), trigger manually and set base_path to /
+          BASE_PATH: ${{ inputs.base_path || format('/{0}/', github.event.repository.name) }}
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - name: Add SPA routing fallback
+        run: cp artifacts/home-tracker/dist/public/index.html artifacts/home-tracker/dist/public/404.html
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Disable Jekyll processing
+        run: touch artifacts/home-tracker/dist/public/.nojekyll
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: artifacts/home-tracker/dist/public
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: artifacts/home-tracker/dist/public
+          publish_branch: gh-pages
+          force_orphan: true
