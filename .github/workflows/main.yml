@@ -28,6 +28,7 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: latest
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,6 +38,8 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          npm_config_user_agent: pnpm
 
       - name: Build
         run: pnpm --filter @workspace/home-tracker run build
