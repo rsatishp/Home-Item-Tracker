@@ -12,10 +12,36 @@ export interface Item {
 const ITEMS_KEY = "home-tracker-items";
 const GEMINI_KEY = "home-tracker-gemini-key";
 
+const VALID_TYPES = new Set(["perishable", "consumable", "non-perishable"]);
+
+function normalizeItem(raw: unknown): Item | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (!r.id || !r.name || typeof r.id !== "string" || typeof r.name !== "string") return null;
+  return {
+    id: r.id,
+    name: String(r.name),
+    location: typeof r.location === "string" && r.location ? r.location : "unknown",
+    type: VALID_TYPES.has(r.type as string)
+      ? (r.type as Item["type"])
+      : "non-perishable",
+    tags: Array.isArray(r.tags) ? r.tags.filter((t) => typeof t === "string") : [],
+    notes: typeof r.notes === "string" ? r.notes : "",
+    originalText: typeof r.originalText === "string" ? r.originalText : "",
+    updatedAt:
+      typeof r.updatedAt === "string" && r.updatedAt
+        ? r.updatedAt
+        : new Date().toISOString(),
+  };
+}
+
 export function getItems(): Item[] {
   try {
     const data = localStorage.getItem(ITEMS_KEY);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    const parsed: unknown = JSON.parse(data);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeItem).filter((i): i is Item => i !== null);
   } catch (err) {
     console.error("Failed to parse items from local storage", err);
     return [];
@@ -68,10 +94,14 @@ export async function importJSON(file: File): Promise<Item[]> {
           throw new Error("Invalid format: expected an array of items");
         }
         
-        // Basic validation
-        const validItems = parsed.filter(i => i && typeof i === 'object' && i.id && i.name && i.type);
-        localStorage.setItem(ITEMS_KEY, JSON.stringify(validItems));
-        resolve(validItems);
+        const normalized = parsed
+          .map(normalizeItem)
+          .filter((i): i is Item => i !== null);
+        if (normalized.length === 0 && parsed.length > 0) {
+          throw new Error("No valid items found in file");
+        }
+        localStorage.setItem(ITEMS_KEY, JSON.stringify(normalized));
+        resolve(normalized);
       } catch (err) {
         reject(err);
       }
