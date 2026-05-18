@@ -41,12 +41,12 @@ export default function Settings() {
       await generateContent("Reply with exactly the word 'SUCCESS' and nothing else.");
       setTestSuccess(true);
       toast({ description: "API key is working!" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setTestSuccess(false);
       toast({ 
         variant: "destructive", 
         title: "Connection Failed",
-        description: err.message || "Failed to verify API key" 
+        description: err instanceof Error ? err.message : "Failed to verify API key",
       });
     } finally {
       setIsTesting(false);
@@ -66,11 +66,11 @@ export default function Settings() {
       const items = await importJSON(file);
       setItemCount(items.length);
       toast({ description: `Successfully imported ${items.length} items` });
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({ 
         variant: "destructive", 
         title: "Import Failed",
-        description: err.message || "Invalid file format" 
+        description: err instanceof Error ? err.message : "Invalid file format",
       });
     }
     

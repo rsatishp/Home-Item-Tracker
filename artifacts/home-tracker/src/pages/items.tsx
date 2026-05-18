@@ -176,7 +176,7 @@ export default function Items() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="type">Type</Label>
-                <Select value={editingItem?.type} onValueChange={(v: any) => setEditingItem(prev => prev ? {...prev, type: v} : null)}>
+                <Select value={editingItem?.type} onValueChange={(v: Item['type']) => setEditingItem(prev => prev ? {...prev, type: v} : null)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
