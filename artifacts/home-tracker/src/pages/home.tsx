@@ -5,6 +5,7 @@ import { extractItemInfo, applyExtraction, askQuestion, ExtractionResult, ApplyR
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -123,18 +124,27 @@ export default function Home() {
           Record something
         </h2>
         <form onSubmit={handleRecordSubmit} className="relative">
-          <Input
+          <Textarea
             value={recordInput}
             onChange={(e) => setRecordInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (recordInput.trim() && !isExtracting && !pendingExtraction) {
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }
+            }}
             placeholder="e.g. I put the batteries in the hall closet"
-            className="pr-12 py-6 text-base bg-card border-border shadow-sm rounded-xl"
+            rows={3}
+            className="pr-12 py-4 text-base bg-card border-border shadow-sm rounded-xl resize-none"
             disabled={isExtracting || !!pendingExtraction}
             data-testid="input-record"
           />
           <Button
             type="submit"
             size="icon"
-            className="absolute right-2 top-2 bottom-2 h-auto"
+            className="absolute right-2 bottom-2 h-9 w-9"
             disabled={isExtracting || !recordInput.trim() || !!pendingExtraction}
             data-testid="button-record"
           >

@@ -182,7 +182,10 @@ export function applyExtraction(result: ExtractionResult, userInput: string): Ap
   const timestamp = new Date().toISOString();
 
   if (result.action === "add") {
-    const existing = findBestMatch(result.name, existingItems, 0.85);
+    // Exact case-insensitive match for add/update to avoid false overwrites
+    const existing = existingItems.find(
+      (i) => i.name.toLowerCase() === result.name.toLowerCase()
+    ) ?? null;
     const isUpdate = !!existing;
 
     const itemToSave: Item = existing
